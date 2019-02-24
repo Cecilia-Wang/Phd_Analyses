@@ -1,0 +1,158 @@
+---
+title: "Mock_calculation"
+author: "Cecilia"
+date: "2/22/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+**Notice**
+You have loaded plyr after dplyr - this is likely to cause problems.
+If you need functions from both plyr and dplyr, please load plyr first, then dplyr:
+library(plyr); library(dplyr)
+
+```{r load libraries}
+library(data.table)
+
+library(plyr)
+library(dplyr)
+
+```
+
+
+```{r load files}
+
+setwd("/Users/ceciliawang/Dropbox/PhD_folder/Our_land_and_water/Benchmarking/In_vitro/16S_amplicom_mock_design")
+Even_cal<-read.csv("Even_mock_DNA_calculation.csv")
+Stag_cal<-read.csv("Stag_mock_DNA_calculation.csv")
+Hungate_info<-read.csv("Hungate_sample_genome_copies.csv")
+Hungate_info<-subset(Hungate_info, Hungate_info$arrival_AgResearch=="Y")
+
+
+```
+
+```{r Even mocks}
+
+## Merge the Even_mock design spreadsheet and the Hungate_genome info
+Even_mock<-merge(Even_cal,Hungate_info, by="Hungate_ID")
+
+# Calculate how much DNA is need for each strain in each group/single run/double run
+Even_mock$Strain_DNA_amount_Single_Group<-Even_mock$Genome_weight..ng_per_copy.*Even_mock$Strain_DNA_copy_single_group
+Even_mock$Strain_DNA_amount_single_run<-Even_mock$Strain_DNA_amount_Single_Group * Even_mock$com_number_need
+Even_mock$Strain_DNA_amount_double_run<-Even_mock$Strain_DNA_amount_Single_Group * Even_mock$Com_number_prep
+
+Even_mock$DNA_volum_single_run<-Even_mock$Strain_DNA_amount_single_run/Even_mock$DNA.Concentration..ng.ul.
+Even_mock$DNA_volum_dounle_run<-Even_mock$Strain_DNA_amount_double_run/Even_mock$DNA.Concentration..ng.ul.
+
+
+# change the format so the DNA volumn can be calculated
+Even_mock$DNA.Concentration..ng.ul.<-as.numeric(as.character(Even_mock$DNA.Concentration..ng.ul.))
+
+
+# summarise DNA quantity needed for each run 
+Even_mock_strain_sum<-Even_mock %>% select(Hungate_ID,DNA.Concentration..ng.ul.,Strain_DNA_amount_single_run) %>%
+group_by(Hungate_ID,DNA.Concentration..ng.ul.) %>% summarise(Strain_DNA_amount_total = sum(Strain_DNA_amount_single_run)) 
+
+Even_mock_strain_sum$DNA_volumn_required<-Even_mock_strain_sum$Strain_DNA_amount_total/Even_mock_strain_sum$DNA.Concentration..ng.ul.
+
+Even_mock_strain_sum$DNA_volumn_double_run<-Even_mock_strain_sum$DNA_volumn_required*2
+
+```
+
+```{r calculate average taxonomy relative abundance in 20 sheep rumen samples represent different methane emission levels, eval=FALSE, include=FALSE}
+setwd("/Users/ceciliawang/Dropbox/PhD_folder/Hydrogenase_project/Data_analyses/Thesis_analyses/taxonomy_profiling")
+
+# List all txt files including sub-folders
+list_of_files <- list.files(path = ".", pattern = "*.summary" , full.names = TRUE)
+
+# Read all the files and create a FileName column to store filenames
+DT <- rbindlist( sapply(list_of_files, read.delim, simplify = FALSE),
+                 use.names = TRUE, idcol = "FileName", fill=TRUE )
+DT<-subset(DT, DT$reads!="NA") # remove redundant rows
+colnames(DT)[2]<-"Relative_abundance"
+DT$Relative_abundance<-as.numeric(as.character(DT$Relative_abundance))
+
+# save the DT and merged species under the same genus into genus level
+# write.csv(DT, "/Users/ceciliawang/Dropbox/PhD_folder/Hydrogenase_project/Data_analyses/Thesis_analyses/taxonomy_profiling/DT.csv", quote = FALSE, row.names = FALSE)
+```
+
+
+```{r}
+# load dataset
+DT<-read.csv("/Users/ceciliawang/Dropbox/PhD_folder/Hydrogenase_project/Data_analyses/Thesis_analyses/taxonomy_profiling/DT.csv")
+
+# DT1<-DT %>% group_by(genus,FileName, reads, Relative_abundance) %>% summarise(reads= sum(reads), Relative_abundance = sum(Relative_abundance)) 
+
+# calculate the average relative abundance for each genus (note that some species are summarized first before calculating relative abundance for each genus)
+
+DT1<-ddply(DT, .(genus, FileName), summarize, Relative_abundance=sum(Relative_abundance), reads=sum(reads), Genera_count=length(genus))
+
+DT_ave<-ddply(DT1, .(genus), summarize, mean_RA=mean(Relative_abundance), mean_reads=mean(reads), Genera_count=length(genus)) 
+
+```
+
+
+
+```{r Stagger mocks}
+
+## Merge the Stag_mock design spreadsheet and the Hungate_genome info
+Stag_mock<-merge(Stag_cal,Hungate_info, by="Hungate_ID")
+
+# Calculate the copy numbers based on 20 sheep rumen sample taxonomy profile (average)
+Stag_mock$Genome_composition_in_MetaGen<-DT_ave$mean_RA[match(Stag_mock$Genus.x,DT_ave$genus)]
+
+# Save the document and fill the blank 
+
+# write.csv(Stag_mock, "/Users/ceciliawang/Dropbox/PhD_folder/Our_land_and_water/Benchmarking/In_vitro/16S_amplicom_mock_design/Stag_mock.csv", row.names = FALSE)
+# Stag_mock<-read.csv("/Users/ceciliawang/Dropbox/PhD_folder/Our_land_and_water/Benchmarking/In_vitro/16S_amplicom_mock_design/Stag_mock.csv")
+
+# Calculate mock relative abundance of each strain per group
+Stag_mock1<-Stag_mock %>% select(Group, Genus.x,Genome_composition_in_MetaGen) %>% unique()
+Stag_group_abundance_cal<-ddply(Stag_mock1, .(Group),  summarize, Total_Group_abundance=sum(Genome_composition_in_MetaGen))
+
+# calculate the DNA relative abundance in the mock for each group based on public data
+Stag_mock$Total_Group_abundance<-Stag_group_abundance_cal$Total_Group_abundance[match(Stag_mock$Group, Stag_group_abundance_cal$Group)]
+
+Stag_mock$Genome_composition_in_Mock<-(Stag_mock$Genome_composition_in_MetaGen/Stag_mock$Total_Group_abundance)/Stag_mock$No_of_strains_in_this_mock_from_each_same_genus
+
+# calculate the genome copy numbers per strain in each group based on calculated relative abundance
+Stag_mock$Strain_DNA_copy_single_group<-Stag_mock$Genome_composition_in_Mock*Stag_mock$Total_genome_number_per_group
+
+
+# Calculate how much DNA is need for each strain in each group/single run/double run
+Stag_mock$Strain_DNA_amount_Single_Group<-Stag_mock$Genome_weight..ng_per_copy.*Stag_mock$Strain_DNA_copy_single_group
+Stag_mock$Strain_DNA_amount_single_run<-Stag_mock$Strain_DNA_amount_Single_Group * Stag_mock$com_number_need
+Stag_mock$Strain_DNA_amount_double_run<-Stag_mock$Strain_DNA_amount_Single_Group * Stag_mock$Com_number_prep
+
+Stag_mock$DNA.Concentration..ng.ul.<-as.numeric(as.character(Stag_mock$DNA.Concentration..ng.ul.))
+
+Stag_mock$DNA_volum_single_run<-Stag_mock$Strain_DNA_amount_single_run/Stag_mock$DNA.Concentration..ng.ul.
+Stag_mock$DNA_volum_dounle_run<-Stag_mock$Strain_DNA_amount_double_run/Stag_mock$DNA.Concentration..ng.ul.
+
+# options("scipen"=100, "digits"=4) Run this line to see normal numbers instead of scientific numbers
+
+# summarise DNA quantity needed for each run 
+Stag_mock_strain_sum<-Stag_mock %>% select(Hungate_ID,DNA.Concentration..ng.ul.,Strain_DNA_amount_single_run) %>%
+group_by(Hungate_ID,DNA.Concentration..ng.ul.) %>% summarise(Strain_DNA_amount_total = sum(Strain_DNA_amount_single_run)) 
+
+Stag_mock_strain_sum$DNA_volumn_required<-Stag_mock_strain_sum$Strain_DNA_amount_total/Stag_mock_strain_sum$DNA.Concentration..ng.ul.
+
+Stag_mock_strain_sum$DNA_volumn_double_run<-Stag_mock_strain_sum$DNA_volumn_required*2
+
+
+```
+
+
+
+```{r check if enough DNA for all samples, eval=FALSE, include=FALSE}
+Total_DNA_check<-rbind(Stag_mock_strain_sum,Even_mock_strain_sum) %>% group_by(Hungate_ID) %>% summarise(Total_DNA_single_run=sum(Strain_DNA_amount_total), DNA_volumn_required=sum(DNA_volumn_required))
+
+# There is enough DNA to run everything once
+
+
+# Save the spreadsheet as final 
+write.csv(Stag_mock,"/Users/ceciliawang/Dropbox/PhD_folder/Our_land_and_water/Benchmarking/In_vitro/16S_amplicom_mock_design/Stag_mock_final.csv")
+write.csv(Even_mock,"/Users/ceciliawang/Dropbox/PhD_folder/Our_land_and_water/Benchmarking/In_vitro/16S_amplicom_mock_design/Even_mock_final.csv")
+
+```
